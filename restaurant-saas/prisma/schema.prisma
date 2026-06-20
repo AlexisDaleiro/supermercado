@@ -1,0 +1,389 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// MULTI-TENANCY: Restaurant (Tenant)
+// ============================================
+model Restaurant {
+  id           String   @id @default(cuid())
+  name         String
+  logo         String?
+  address      String?
+  phone        String?
+  email        String?
+  currency     String   @default("USD")
+  timezone     String   @default("America/Mexico_City")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  
+  // Relations
+  users        User[]
+  branches     Branch[]
+  inventoryItems InventoryItem[]
+  customers    Customer[]
+  conversations Conversation[]
+  auditLogs    AuditLog[]
+  
+  @@index([name])
+  @@map("restaurants")
+}
+
+// ============================================
+// SUCURSALES
+// ============================================
+model Branch {
+  id           String   @id @default(cuid())
+  restaurantId String
+  name         String
+  address      String?
+  phone        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  
+  // Relations
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  inventoryItems InventoryItem[]
+  
+  @@index([restaurantId])
+  @@map("branches")
+}
+
+// ============================================
+// USUARIOS Y AUTENTICACIÓN
+// ============================================
+enum Role {
+  SUPER_ADMIN
+  OWNER
+  MANAGER
+  EMPLOYEE
+  CASHIER
+}
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  password      String
+  firstName     String
+  lastName      String
+  role          Role     @default(EMPLOYEE)
+  restaurantId  String?
+  isActive      Boolean  @default(true)
+  lastLoginAt   DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  // Relations
+  restaurant    Restaurant? @relation(fields: [restaurantId], references: [id], onDelete: SetNull)
+  refreshTokens RefreshToken[]
+  movements     InventoryMovement[]
+  auditLogs     AuditLog[]
+  conversations Conversation[]
+  
+  @@index([email])
+  @@index([restaurantId])
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  
+  // Relations
+  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([token])
+  @@map("refresh_tokens")
+}
+
+// ============================================
+// INVENTARIO
+// ============================================
+enum MovementType {
+  ENTRY
+  EXIT
+  WASTE
+  ADJUSTMENT
+  TRANSFER
+}
+
+model InventoryItem {
+  id              String   @id @default(cuid())
+  tenantId        String
+  branchId        String?
+  name            String
+  sku             String?
+  category        String?
+  unit            String   @default("unit")
+  currentStock    Float    @default(0)
+  minStock        Float    @default(10)
+  costPerUnit     Float    @default(0)
+  supplier        String?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Relations
+  restaurant      Restaurant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch          Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  movements       InventoryMovement[]
+  recipeIngredients RecipeIngredient[]
+  
+  @@unique([tenantId, sku])
+  @@index([tenantId])
+  @@index([tenantId, category])
+  @@index([currentStock])
+  @@map("inventory_items")
+}
+
+model InventoryMovement {
+  id            String       @id @default(cuid())
+  itemId        String
+  quantity      Float
+  type          MovementType
+  notes         String?
+  userId        String
+  previousStock Float?
+  newStock      Float?
+  createdAt     DateTime     @default(now())
+  
+  // Relations
+  item          InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  user          User @relation(fields: [userId], references: [id])
+  
+  @@index([itemId])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("inventory_movements")
+}
+
+// ============================================
+// RECETAS
+// ============================================
+model Recipe {
+  id          String   @id @default(cuid())
+  tenantId    String
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  ingredients RecipeIngredient[]
+  
+  @@index([tenantId])
+  @@map("recipes")
+}
+
+model RecipeIngredient {
+  id              String        @id @default(cuid())
+  recipeId        String
+  inventoryItemId String
+  quantity        Float
+  unit            String        @default("unit")
+  
+  // Relations
+  recipe          Recipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  inventoryItem   InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+  
+  @@unique([recipeId, inventoryItemId])
+  @@map("recipe_ingredients")
+}
+
+// ============================================
+// CLIENTES / CRM
+// ============================================
+model Customer {
+  id           String   @id @default(cuid())
+  tenantId     String
+  name         String
+  phone        String?
+  email        String?
+  notes        String?
+  preferences  Json?
+  totalSpent   Float    @default(0)
+  orderCount   Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  
+  // Relations
+  restaurant   Restaurant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+  
+  @@index([tenantId])
+  @@index([phone])
+  @@index([email])
+  @@map("customers")
+}
+
+// ============================================
+// MENSAJERÍA OMNICANAL
+// ============================================
+enum MessageChannel {
+  WHATSAPP
+  INSTAGRAM
+  FACEBOOK
+  TELEGRAM
+  WEB
+  EMAIL
+}
+
+enum ConversationStatus {
+  OPEN
+  PENDING
+  CLOSED
+}
+
+model Conversation {
+  id           String            @id @default(cuid())
+  tenantId     String
+  customerId   String?
+  assignedToId String?
+  channel      MessageChannel
+  status       ConversationStatus @default(OPEN)
+  tags         String[]
+  externalId   String?
+  metadata     Json?
+  lastMessageAt DateTime?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  
+  // Relations
+  restaurant   Restaurant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer     Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  assignedTo   User? @relation(fields: [assignedToId], references: [id], onDelete: SetNull)
+  messages     Message[]
+  
+  @@index([tenantId])
+  @@index([customerId])
+  @@index([status])
+  @@index([channel])
+  @@map("conversations")
+}
+
+model Message {
+  id             String   @id @default(cuid())
+  conversationId String
+  content        String
+  direction      String   // inbound | outbound
+  isRead         Boolean  @default(false)
+  metadata       Json?
+  aiGenerated    Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  
+  // Relations
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  
+  @@index([conversationId])
+  @@index([createdAt])
+  @@map("messages")
+}
+
+// ============================================
+// AUDITORÍA
+// ============================================
+model AuditLog {
+  id           String   @id @default(cuid())
+  tenantId     String?
+  userId       String?
+  action       String
+  entity       String
+  entityId     String?
+  previousData Json?
+  newData      Json?
+  ipAddress    String?
+  userAgent    String?
+  createdAt    DateTime @default(now())
+  
+  // Relations
+  restaurant   Restaurant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  user         User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  
+  @@index([tenantId])
+  @@index([userId])
+  @@index([entity])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ============================================
+// NOTIFICACIONES
+// ============================================
+enum NotificationType {
+  EMAIL
+  WHATSAPP
+  PUSH
+  IN_APP
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+model Notification {
+  id        String            @id @default(cuid())
+  tenantId  String
+  userId    String?
+  type      NotificationType
+  status    NotificationStatus @default(PENDING)
+  title     String
+  message   String
+  data      Json?
+  sentAt    DateTime?
+  createdAt DateTime          @default(now())
+  
+  @@index([tenantId])
+  @@index([userId])
+  @@index([status])
+  @@map("notifications")
+}
+
+// ============================================
+// FACTURACIÓN / SUSCRIPCIONES
+// ============================================
+enum PlanType {
+  STARTER
+  PRO
+  BUSINESS
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  INACTIVE
+  CANCELED
+  PAST_DUE
+}
+
+model Subscription {
+  id               String           @id @default(cuid())
+  restaurantId     String           @unique
+  plan             PlanType         @default(STARTER)
+  status           SubscriptionStatus @default(INACTIVE)
+  stripeCustomerId String?
+  stripeSubscriptionId String?
+  currentPeriodEnd DateTime?
+  maxBranches      Int              @default(1)
+  maxUsers         Int              @default(3)
+  price            Float            @default(29.99)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  
+  // Relations
+  restaurant       Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  
+  @@index([restaurantId])
+  @@index([status])
+  @@map("subscriptions")
+}
