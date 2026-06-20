@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -28,6 +28,7 @@ model Restaurant {
   inventoryItems InventoryItem[]
   customers    Customer[]
   conversations Conversation[]
+  subscriptions Subscription[]
   auditLogs    AuditLog[]
   
   @@index([name])
@@ -251,7 +252,7 @@ model Conversation {
   assignedToId String?
   channel      MessageChannel
   status       ConversationStatus @default(OPEN)
-  tags         String[]
+  tags         Json?
   externalId   String?
   metadata     Json?
   lastMessageAt DateTime?
